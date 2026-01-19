@@ -1,20 +1,16 @@
 name: VyOS LTS Build
 
 on:
-#  push:
-#    tags:
-#      - "*"
   workflow_dispatch:
     inputs:
       version:
         required: true
-        default: "1.4.0"
+        default: "1.4.4"
         description: VyOS version
         type: string
 
 jobs:
   build:
-
     runs-on: ubuntu-latest
     container: 
       # For VyOS 1.2 (crux) use vyos/vyos-build:crux
@@ -24,46 +20,52 @@ jobs:
       # Ref: https://docs.vyos.io/en/latest/contributing/build-vyos.html#build
       image: vyos/vyos-build:sagitta
       env:
-        TZ: Asia/Tokyo
+        TZ: Europe/Rome
       options: --privileged
     env:
-      TZ: Asia/Tokyo
+      TZ: Europe/Rome
     permissions:
       actions: read
       contents: write
 
     steps:
+      - name: Download APT key
+        run: |
+          set -eux
+          wget https://vyos.tnyzeq.icu/apt/apt.gpg.key -O /opt/apt.gpg.key
+
       - name: Git clone vyos-build
         run: |
           set -eux
-          
-          git clone -b sagitta --single-branch https://github.com/vyos/vyos-build
+          git clone -b sagitta --single-branch https://github.com/dd010101/vyos-build.git
 
       - name: Cleanup env
         working-directory: vyos-build
         run: |
           set -eux
-
           make clean
 
       - name: Make ISO
         working-directory: vyos-build
         run: |
           set -eux
-          
           ./build-vyos-image iso \
-            --architecture "amd64" \
-            --build-by "9667078+naa0yama@users.noreply.github.com" \
-            --build-type "release" \
+            --architecture amd64 \
+            --build-by "${{ github.actor }}@users.noreply.github.com" \
+            --build-type release \
+            --vyos-mirror "https://vyos.tnyzeq.icu/apt/sagitta" \
+            --custom-apt-key /opt/apt.gpg.key \
             --version "${{ inputs.version }}"
 
-      - name: ls
+      - name: Generate checksums
         run: |
           set -eux
-
           pwd
           ls -lah
           ls -lah vyos-build/build
+          ISOFILE="vyos-build/build/vyos-${{ inputs.version }}-iso-amd64.iso"
+          echo "SHA1=$(sha1sum $ISOFILE | cut -d' ' -f1)" >> $GITHUB_ENV
+          echo "SHA256=$(sha256sum $ISOFILE | cut -d' ' -f1)" >> $GITHUB_ENV
 
       - name: Pre-Release
         uses: softprops/action-gh-release@v2
@@ -72,7 +74,11 @@ jobs:
           tag_name: ${{ inputs.version }}
           body: |
             VyOS ${{ inputs.version }} LTS
+            
+            **Checksums:**
+            - SHA1: ${{ env.SHA1 }}
+            - SHA256: ${{ env.SHA256 }}
           draft: true
           prerelease: true
           files: |
-            vyos-build/build/vyos-${{ inputs.version }}-amd64.iso
+            vyos-build/build/vyos-${{ inputs.version }}-iso-amd64.iso
